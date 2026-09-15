@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<!-- 針對 iPad 和行動裝置優化，防止縮放干擾操作 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>澱粉化學消化互動模擬</title>
+<style>
+  body {
+    font-family: "PingFang HK", "Microsoft JhengHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #f4f9f9;
+    margin: 0;
+    padding: 20px;
+    /* 防止在觸控螢幕上拖曳物件時觸發頁面捲動 */
+    touch-action: none; 
+  }
+  #game-container {
+    width: 100%;
+    max-width: 800px;
+    height: 500px;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    position: relative;
+    overflow: hidden;
+  }
+  .title { 
+    text-align: center; 
+    color: #333; 
+    margin-bottom: 5px;
+  }
+  #message {
+    text-align: center;
+    font-size: 22px;
+    font-weight: bold;
+    color: #666;
+    margin-bottom: 20px;
+    height: 30px;
+    transition: color 0.3s;
+  }
+  
+  /* === 澱粉 (Starch) 樣式 === */
+  #starch {
+    position: absolute;
+    top: 25%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 400px;
+    height: 100px;
+  }
+  .hexagon {
+    fill: #7bc0e3; /* 與您提供的圖片相近的淺藍色 */
+    /* 設定動畫效果：當位置改變時平滑移動 */
+    transition: transform 1.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transform-origin: center;
+  }
+  .bond {
+    stroke: #333;
+    stroke-width: 3;
+    transition: opacity 0.3s ease-out; /* 斷開連結時的淡出效果 */
+  }
+
+  /* === 酶 (Enzyme) 樣式 === */
+  #enzyme {
+    position: absolute;
+    bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 120px;
+    cursor: grab;
+    z-index: 10;
+    touch-action: none;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
+  }
+  #enzyme:active { cursor: grabbing; }
+  /* 酶的顏色，綠色 */
+  .enzyme-body { fill: #8cc63f; }
+</style>
+</head>
+<body>
+
+<h2 class="title">化學消化模擬：澱粉與酶</h2>
+<div id="message">請將下方的「酶」拖曳到「澱粉」上</div>
+
+<div id="game-container">
+  
+  <!-- 澱粉與化學鍵 SVG -->
+  <svg id="starch" viewBox="0 0 400 100">
+    <!-- 化學鍵 (黑線) -->
+    <g id="bonds">
+      <line x1="50" y1="50" x2="110" y2="50" class="bond" />
+      <line x1="110" y1="50" x2="170" y2="50" class="bond" />
+      <line x1="170" y1="50" x2="230" y2="50" class="bond" />
+      <line x1="230" y1="50" x2="290" y2="50" class="bond" />
+      <line x1="290" y1="50" x2="350" y2="50" class="bond" />
+    </g>
+    <!-- 澱粉分子 (藍色六角形) -->
+    <g id="hexagons">
+      <polygon points="50,20 65,30 65,50 50,60 35,50 35,30" class="hexagon" id="hex1"/>
+      <polygon points="110,20 125,30 125,50 110,60 95,50 95,30" class="hexagon" id="hex2"/>
+      <polygon points="170,20 185,30 185,50 170,60 155,50 155,30" class="hexagon" id="hex3"/>
+      <polygon points="230,20 245,30 245,50 230,60 215,50 215,30" class="hexagon" id="hex4"/>
+      <polygon points="290,20 305,30 305,50 290,60 275,50 275,30" class="hexagon" id="hex5"/>
+      <polygon points="350,20 365,30 365,50 350,60 335,50 335,30" class="hexagon" id="hex6"/>
+    </g>
+  </svg>
+
+  <!-- 酶 SVG (畫成有缺口的圓形，像小精靈) -->
+  <svg id="enzyme" viewBox="0 0 120 120">
+    <!-- 利用 SVG path 畫出缺口圓 -->
+    <path d="M60,60 L60,5 A55,55 0 1,1 15,35 Z" class="enzyme-body" transform="rotate(-30 60 60)"/>
+  </svg>
+  
+</div>
+
+<script>
+  const enzyme = document.getElementById('enzyme');
+  const starch = document.getElementById('starch');
+  const message = document.getElementById('message');
+  const bonds = document.getElementById('bonds');
+  const hexagons = document.querySelectorAll('.hexagon');
+  
+  let isDragging = false;
+  let startX, startY, initialLeft, initialTop;
+  let hasDigested = false;
+
+  // --- 拖曳邏輯 (使用 Pointer Events 支援觸控與滑鼠) ---
+  
+  enzyme.addEventListener('pointerdown', (e) => {
+    if (hasDigested) return;
+    isDragging = true;
+    enzyme.setPointerCapture(e.pointerId); // 鎖定游標事件
+    
+    // 記錄起始點
+    startX = e.clientX;
+    startY = e.clientY;
+    
+    // 計算初始位置，並將酶從置中(transform)改為絕對座標定位，方便拖曳
+    const rect = enzyme.getBoundingClientRect();
+    const containerRect = enzyme.parentElement.getBoundingClientRect();
+    initialLeft = rect.left - containerRect.left;
+    initialTop = rect.top - containerRect.top;
+    
+    enzyme.style.transform = 'none';
+    enzyme.style.left = initialLeft + 'px';
+    enzyme.style.top = initialTop + 'px';
+    enzyme.style.bottom = 'auto'; // 取消 bottom 定位
+  });
+
+  enzyme.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    // 計算移動距離
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    // 更新酶的位置
+    enzyme.style.left = (initialLeft + dx) + 'px';
+    enzyme.style.top = (initialTop + dy) + 'px';
+  });
+
+  enzyme.addEventListener('pointerup', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    enzyme.releasePointerCapture(e.pointerId);
+
+    // 檢查碰撞 (Collision Detection)
+    const enzymeRect = enzyme.getBoundingClientRect();
+    const starchRect = starch.getBoundingClientRect();
+
+    // 簡單的矩形重疊判定
+    if (
+      enzymeRect.left < starchRect.right &&
+      enzymeRect.right > starchRect.left &&
+      enzymeRect.top < starchRect.bottom &&
+      enzymeRect.bottom > starchRect.top
+    ) {
+      // 成功配對！執行消化動畫
+      triggerDigestion();
+    } else {
+      // 沒對準，酶彈回原位
+      resetEnzymePosition();
+    }
+  });
+
+  function resetEnzymePosition() {
+    enzyme.style.transition = 'all 0.3s ease'; // 加入彈回的動畫
+    enzyme.style.transform = 'translateX(-50%)';
+    enzyme.style.left = '50%';
+    enzyme.style.top = 'auto';
+    enzyme.style.bottom = '10%';
+    
+    // 動畫結束後移除 transition 以免影響下次拖曳
+    setTimeout(() => {
+      enzyme.style.transition = '';
+    }, 300);
+  }
+
+  function triggerDigestion() {
+    hasDigested = true;
+    
+    // 1. 更新提示文字與顏色
+    message.innerText = "成功分解！澱粉被轉化為散落的葡萄糖！";
+    message.style.color = "#4CAF50"; // 變成綠色
+    
+    // 2. 隱藏化學鍵 (黑線)
+    bonds.style.opacity = '0';
+
+    // 3. 讓六角形 (葡萄糖) 散開
+    // 設定每個葡萄糖分子要散落到的相對位置 (X, Y) 和旋轉角度
+    const scatterData = [
+      {x: -120, y: 150, r: 45},
+      {x: -50, y: 220, r: -30},
+      {x: 30, y: 170, r: 80},
+      {x: 120, y: 250, r: -60},
+      {x: 180, y: 140, r: 15},
+      {x: 250, y: 200, r: -45}
+    ];
+
+    hexagons.forEach((hex, index) => {
+      const data = scatterData[index];
+      // 套用 CSS transform 讓它們飛散並旋轉
+      hex.style.transform = `translate(${data.x}px, ${data.y}px) rotate(${data.r}deg)`;
+    });
+
+    // 4. (選用) 酶在作用後可以淡出或移開
+    setTimeout(() => {
+      enzyme.style.transition = 'opacity 1s, transform 1s';
+      enzyme.style.opacity = '0';
+      enzyme.style.transform = 'translate(100px, 100px)'; // 酶作用完離開
+    }, 800);
+  }
+</script>
+</body>
+</html>
